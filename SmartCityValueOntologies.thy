@@ -1,0 +1,455 @@
+theory SmartCityValueOntologies (*\<copyright> A. Vestrucci 2025*)
+  imports Main
+begin
+nitpick_params[user_axioms,expect=genuine,show_all,format=3]
+declare[[show_types]]
+(*  We model three value ontologies for Smart City projects, using a modal preference logic 
+  with ceteris paribus (all else equal) operators (after van Benthem et al., 2009). 
+  Each ontology defines how project outcomes (sets of promoted values) are compared.*)
+
+(*datatype Cluster = A | B | C
+fun cluster_of :: "Value ⇒ Cluster" where
+  "cluster_of A1 = A" | "cluster_of A2 = A" | "cluster_of A3 = A" |
+  "cluster_of B1 = B" | "cluster_of B2 = B" | "cluster_of B3 = B" |
+  "cluster_of C1 = C" | "cluster_of C2 = C" | "cluster_of C3 = C"*)
+
+typedecl p   (* projects*)
+
+datatype Value = A1 | A2 | A3 | B1 | B2 | B3 | C1 | C2 | C3
+type_synonym cluster = "Value set"
+
+definition cluster_A :: cluster where
+  "cluster_A = {A1, A2, A3}"
+
+definition cluster_B :: cluster where
+  "cluster_B = {B1, B2, B3}"
+
+definition cluster_C :: cluster where
+  "cluster_C = {C1, C2, C3}"
+
+abbreviation A where "A ≡ cluster_A"
+abbreviation B where "B ≡ cluster_B"
+abbreviation C where "C ≡ cluster_C"
+
+definition cluster_of :: "Value ⇒ Value set" where
+  "cluster_of  \<equiv> \<lambda> v . (if v ∈ A then A
+                   else if v ∈ B then B
+                   else C)"
+lemma "A \<equiv> cluster_of A1" 
+  by (simp add: cluster_A_def cluster_of_def)  (*trivial test*)
+
+consts promotes :: "p ⇒ Value " (*NB: "promotes" returns a single value.*)
+consts promotes_pred :: "p \<Rightarrow> Value \<Rightarrow> bool" (*now "promotes" returns a set of values*)
+consts promotes_set :: "p \<Rightarrow> Value set" (*Idem*)
+
+axiomatization where (*promotes_in_set: "promotes P ∈ promotes_set P" and*)
+  set_nonempty:    "promotes_set P ≠ {}"
+
+(*(* Each Smart City project  has an incidence relation I indicating which values it promotes. *)
+consts I :: "  p ⇒ Value ⇒ bool"   (* I p v means that project p  promotes value v *)
+abbreviation Iset :: "  p ⇒ Value set" where
+  "Iset p ≡ {v. v = promotes p }"   (* The set of values promoted in project p *)*)
+
+
+(********************************************************************************************************************)
+(** Ontology 1: A fixed total value order. **)
+
+locale Ontology1  
+begin
+definition cluster_rank :: "cluster ⇒ nat" where (*fixed ranking of clusters*)
+  "cluster_rank X =
+(if X = A then 3 else if X = B then 2 else 1)"
+
+(*Alternative ranking: 
+
+fun v_rank :: "Value ⇒ nat"  where                
+  "v_rank A1 = 9" | "v_rank A2 = 8" | "v_rank A3 = 7" |
+  "v_rank B1 = 6" | "v_rank B2 = 5" | "v_rank B3 = 4" |
+  "v_rank C1 = 3" | "v_rank C2 = 2" | "v_rank C3 = 1"
+
+The following definitions are remade below, for ceteris paribus:
+abbreviation best_rank :: "p ⇒ nat"  where
+  "best_rank P ≡ Max (v_rank ` Iset P)"      (* well-defined because Max works on finite sets*)
+definition best_val :: "p ⇒ Value" where
+  "best_val P ≡ (THE v. v ∈ Iset P ∧ v_rank v = best_rank P)"
+*)
+
+fun intra_rank :: "Value ⇒ nat" where
+  "intra_rank A1 = 3" | "intra_rank A2 = 2" | "intra_rank A3 = 1" |
+  "intra_rank B1 = 3" | "intra_rank B2 = 2" | "intra_rank B3 = 1" |
+  "intra_rank C1 = 3" | "intra_rank C2 = 2" | "intra_rank C3 = 1"
+
+definition vGreater :: "Value ⇒ Value ⇒ bool"  (infix "≻v" 50) where (*ordering of values in Ontology 1, reflecting 
+the fixed ranking of clusters*)
+  "v ≻v w  \<equiv>
+     (cluster_rank (cluster_of v) > cluster_rank (cluster_of w)) ∨
+     (cluster_of v = cluster_of w ∧ intra_rank v > intra_rank w)"
+
+(*Tests:*)
+lemma "A1 ≻v A2 " 
+  by (simp add: cluster_A_def cluster_of_def vGreater_def)
+lemma "C1 ≻v A1"  oops (*ctm, as expected*)
+lemma "A3 ≻v B3"    unfolding vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def   by auto
+lemma "A1 ≻v C1" unfolding vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def   by auto
+lemma "C1 ≻v A1" unfolding vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def oops (*ctm*)
+lemma "B1 ≻v B1" unfolding vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def oops (*ctm*)
+lemma "\<forall> v. A1 \<noteq> v\<longrightarrow> A1  ≻v v" unfolding vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def   by auto
+
+(*Preference relation between Smart City projects: it reflects the preference between possible Smart Cities 
+(aka possible worlds) in case one project instead another is selected. This preference reflects the value ordering: 
+if a project X promotes a value higher than the value promoted by the project Y, then X is preferable to Y.*)
+
+definition pBetter :: "p ⇒ p ⇒ bool" (infix "\<succeq>p" 50) where
+  "P \<succeq>p Q  ≡   (promotes P = promotes Q) \<or> (promotes P ≻v promotes Q) " 
+(*betterness relation between projects: also reflexive, because two projects can be ranked the same. 
+This gives S4 frame*)
+
+(*Tests*)
+
+lemma   " \<forall> P Q. (promotes P ≻v promotes Q )   \<longrightarrow> (P \<succeq>p Q)" 
+  by (simp add: pBetter_def) (*trivial: tested connection b. values ranking and projects betterness*)
+
+lemma pTrans:  "P \<succeq>p Q ⟹ Q \<succeq>p R ⟹ P \<succeq>p R" 
+  unfolding pBetter_def vGreater_def  by fastforce
+
+(*Tests with concrete values:*)
+
+lemma "\<forall>P Q. (( A1 = promotes P) \<and> (B3 = promotes Q)) \<longrightarrow> (P \<succeq>p Q)" 
+  unfolding pBetter_def vGreater_def vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def   by simp
+ 
+lemma "\<forall> P Q. (( B2 = promotes P) \<and> (C1 = promotes Q)) \<longrightarrow> (P \<succeq>p Q)" 
+ unfolding pBetter_def vGreater_def vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def  by auto
+
+lemma "\<forall> P Q. (( B2 = promotes P) \<and> (C1 = promotes Q)) \<longrightarrow> (Q \<succeq>p P)"
+  nitpick (*ctm as expected*) oops
+
+lemma "\<forall> P Q. (( A1 = promotes P) \<and> (A1 = promotes Q)) \<longrightarrow> (P \<succeq>p Q)"
+ unfolding pBetter_def vGreater_def vGreater_def cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def   by simp
+
+(*Now we try with clusters:*)
+
+abbreviation Iset :: "p ⇒ cluster" where
+  "Iset p ≡ cluster_of (promotes p)"
+
+definition clGreater :: "Value set ⇒ Value set ⇒ bool"  (infix "≻cl" 50) where 
+  "v ≻cl w  \<equiv>   (cluster_rank v > cluster_rank w)"
+
+definition pBetter2 :: "p ⇒ p ⇒ bool" (infix "\<succeq>p2" 50) where
+  "P \<succeq>p2 Q  ≡   (Iset P = Iset Q) \<or> (Iset P ≻cl Iset Q) " 
+
+lemma "\<forall> P Q. (( B = Iset P) \<and> (C = Iset Q)) \<longrightarrow> (P \<succeq>p2 Q)" 
+  unfolding pBetter_def vGreater_def  cluster_rank_def cluster_of_def
+            cluster_A_def cluster_B_def cluster_C_def clGreater_def pBetter2_def   by auto
+
+lemma "\<forall> P Q. (( C = Iset P) \<and> (A = Iset Q)) \<longrightarrow> (P \<succeq>p2 Q)" 
+  nitpick (*ctm as expected*) oops
+
+lemma exists_best_cluster_project:
+  assumes "∃P. ∀Q. Iset P ≻cl Iset Q"
+  shows   "∃P. ∀Q. P ≽p2 Q"   using assms clGreater_def by auto
+
+(*A project can promote multiple values: in this case, it is enough to know the top value for each project to know
+which are the best projects - the other values are considered equivalent. 
+Ceteris paribus is interpreted as epistemic negative (I am not concerned by what I do not know). 
+However, first, we need to introduce another version of the betterness relation between projects, because we need
+to clarify that, in case a project promotes a set of values, the betterness is defined on the 
+highest (best) ranked value in the set of values that the project promotes.*)
+
+definition best_val :: "p ⇒ Value" where
+  "best_val P ≡ (SOME v. v ∈ promotes_set P ∧ (∀ w ∈ promotes_set P. intra_rank v ≤ intra_rank w))"
+
+(*lemma best_val_in_set: "best_val P ∈ promotes_set P"
+  unfolding best_val_def using set_nonempty sledgehammer
+
+lemma best_val_min: "w ∈ promotes_set P ⟹ intra_rank (best_val P) ≤ intra_rank w"
+  unfolding best_val_def using set_nonempty
+  by (rule someI2_ex)  (auto intro: Min_le)*)
+
+definition pBetter3  :: "p ⇒ p ⇒ bool" (infix "≽p3" 50) where
+  "P ≽p3 Q  ≡  intra_rank (best_val P) ≤ intra_rank (best_val Q)"
+
+definition Iset2 :: "p ⇒ Value set" where "Iset2 P ≡ { v. v \<in> promotes_set P }"
+definition cp_projects ("_❙≡⇩__") where "P ❙≡⇩Γ Q ≡ ∀v. v ∈ Γ ⟶ (v \<in> Iset2 P ⟷ v \<in> Iset2 Q)" 
+(*above the ceteris paribus: for every variable in Γ, P and Q give the same truth value. In this encoding, 
+whenever the value is in Γ, either both projects promote it or neither does.*)
+definition cp_projects_better ("_\<^bold>\<unrhd>⇩__") where "P \<^bold>\<unrhd>⇩Γ Q ≡ ( P \<succeq>p3 Q) ∧ (P ❙≡⇩Γ Q)"
+lemma "P = Q \<longrightarrow> P \<^bold>\<unrhd>⇩Γ Q " (*confirmed reflexive*) 
+  by (simp add: cp_projects_better_def cp_projects_def pBetter3_def)
+
+lemma
+  assumes "A1 ∈ Iset2 P"      and "A1 ∉ Γ"
+and "\<forall> Q. \<not> A1 ∈ Iset2 Q"      and "B1 ∉ Γ"
+      and "P ❙≡⇩Γ Q"
+      and "∀v. v ∈ Iset2 Q ∧ v ∉ Γ ⟶ A1 ≻v v"
+and NonEmpty:  "∃v. v ∈ Iset2 Q ∧ v ∉ Γ"
+and \<Gamma>NonEmpty : "\<exists> w. w \<in>  Γ"
+  shows   "P \<^bold>\<unrhd>⇩Γ Q" 
+  using assms(1) assms(3) by auto
+ 
+(*definition projset_preferred :: "Value set ⇒ Value set ⇒ bool" where
+  "projset_preferred S T ≡ (∃ v ∈ S. ∀ u ∈ T. rank v > rank u)"
+definition project_preferred :: " p ⇒  p ⇒ bool" where
+  "project_preferred w1 w2 ≡ projset_preferred (Iset w1) (Iset w2)"
+
+(* In this ontology, one project is preferred over another if the highest-ranked value it promotes 
+   is ranked higher than the highest value promoted by the other. *)
+lemma pref_higher_value:
+  assumes "∃ v ∈ Iset w1. ∀ u ∈ Iset w2. rank v > rank u"
+  shows "project_preferred w1 w2"
+  using assms project_preferred_def projset_preferred_def by auto*)
+
+end
+(********************************************************************************************************************)
+(** Ontology 2: A distinction between intra (within) and iter (amongst)  cluster hierarchy. **)
+locale Ontology2 =
+  fixes cl_greater :: "cluster ⇒ cluster ⇒ bool"   (infix "≻\<^sup>c" 50)
+  assumes cl_trans: "\<forall> x y z. x  ≻\<^sup>c y \<and> y ≻\<^sup>c z \<longrightarrow> x ≻\<^sup>c z"
+and  cl_irrefl: "∀x. ¬  (x ≻\<^sup>c x)"
+  and cl_total : "\<forall> x y.  x ≠ y \<longrightarrow>  (x ≻\<^sup>c y) ∨  (y ≻\<^sup>c x)"
+
+  (* We assume a strict  order on clusters (≻_cl). This allows different 
+     priority rankings of the clusters A, B, C (e.g. A ≻_cl B ≻_cl C, etc.). *)
+begin
+
+definition cluster_cw :: "cluster ⇒ cluster" where
+  "cluster_cw X =
+     (if X = A then B
+      else if X = B then C
+      else if X = C then A
+      else {})"
+
+fun cluster_cw  :: "cluster \<Rightarrow> cluster " where
+  "cluster_cw  A = B" |  "cluster_cw  B = C" |  "cluster_cw  C = A"
+
+definition cluster_ccw :: "cluster ⇒ cluster" where
+  "cluster_ccw x = (THE y. cluster_cw y = x)"
+
+lemma bij_cluster_cw: "bij cluster_cw" 
+  by (metis (full_types) Cluster.distinct(1) Cluster.exhaust bij_iff cluster_cw.simps(1) cluster_cw.simps(2) cluster_cw.simps(3))
+
+primrec leader   :: "Cluster ⇒ Value" where
+  "leader A = A1" | "leader B = B1" |  "leader C = C1"
+
+primrec near_cw  :: "Cluster ⇒ Value" where (*neighbooring values*)
+  "near_cw A = A2" |   "near_cw B = B2" |  "near_cw C = C2"
+
+primrec near_ccw :: "Cluster ⇒ Value" where (*neighbooring values*)
+  "near_ccw A = A3" |  "near_ccw B = B3" |   "near_ccw C = C3"
+
+definition intra_lt :: "Value ⇒ Value ⇒ bool" where
+  "intra_lt x y ≡
+     (let C = cluster_of x in
+      if C ≠ cluster_of y then False
+      else if x = leader C then y ≠ leader C     
+      else if y = leader C then False
+      else if cluster_cw C ≻\<^sup>c cluster_ccw C
+           then x = near_cw C ∧ y = near_ccw C    
+           else x = near_ccw  C ∧ y = near_cw C)"
+
+definition outranks :: "Value ⇒ Value ⇒ bool"  (infix "≻\<^sup>v" 50) where
+  "x ≻\<^sup>v y ≡
+     (let Cx = cluster_of x; Cy = cluster_of y in
+      if Cx ≠ Cy then Cx ≻\<^sup>c Cy
+      else intra_lt x y)"
+
+lemma A_chain:
+  assumes order_AB: "A ≻\<^sup>c B"
+assumes order_BC: "B ≻\<^sup>c C" 
+shows "leader A ≻\<^sup>v  near_cw A" and " near_cw A ≻\<^sup>v near_ccw A" 
+  apply (simp add: intra_lt_def outranks_def) oops
+
+lemma B_chain:
+  assumes order_BA: "B ≻\<^sup>c A"
+assumes order_AC: "A ≻\<^sup>c C" 
+shows "leader B ≻\<^sup>v  near_ccw B" and " near_ccw B ≻\<^sup>v near_cw B" 
+  apply (simp add: intra_lt_def outranks_def) oops
+ 
+lemma B_chain:
+  assumes order_BA: "B ≻\<^sup>c A"
+assumes order_AC: "A ≻\<^sup>c C" 
+shows "leader B ≻\<^sup>v  near_cw B" and " near_cw B ≻\<^sup>v near_ccw B" 
+  nitpick oops (*ctm: expected*)
+
+lemma B_chain_inverted_short:
+  assumes  "near_ccw B ≻\<^sup>v near_cw B"
+  shows    "A ≻\<^sup>c C"
+  using assms
+  unfolding outranks_def intra_lt_def   ― ‹open the two definitions›
+  oops
+
+
+lemma B_chain_inverted_short:
+  assumes  "near_ccw B ≻\<^sup>v near_cw B"
+  shows    "A ≻\<^sup>c C" 
+proof -
+  have "intra_lt (near_ccw B) (near_cw B)"
+    using assms by (simp add: outranks_def)
+  ― ‹ last branch of the if-then-else›
+  hence "cluster_ccw B ≻\<^sup>c cluster_cw B" 
+    by (metis Cluster.distinct(1) Cluster.distinct(3) Cluster.distinct(5) Cluster.exhaust Ontology2.intra_lt_def The_unsafe_def Uniq_I Value.distinct(43) Value.distinct(45) Value.distinct(53) cl_total cluster_ccw_def cluster_cw.simps(1) cluster_cw.simps(2) cluster_cw.simps(3) cluster_of.simps(6) intra_lt_def leader.simps(2) near_ccw.simps(2) near_cw.simps(2) the1_equality')
+    thus "A ≻\<^sup>c C"
+       oops
+
+
+
+(*definition cluster_cw :: "Cluster ⇒ Cluster" where 
+  "cluster_cw X ≡ (case X of A ⇒ B | B ⇒ C | C ⇒ A)"
+definition cluster_ccw :: "Cluster ⇒ Cluster" where 
+  "cluster_ccw X ≡ (case X of A ⇒ C | B ⇒ A | C ⇒ B)"*)
+
+(*definition intra_lt :: "Value ⇒ Value ⇒ bool" where
+  "intra_lt x y ≡ (
+   let C = cluster_of x in
+      if C ≠ cluster_of y then False    
+      else if y = leader C then False
+      else if cluster_cw C ≻\<^sup>c\<^sup>l cluster_ccw C
+           then x = near_ccw C ∧ y = near_cw C  
+           else x = near_cw  C ∧ y = near_ccw C)"*)
+
+(*definition outranks :: "Value ⇒ Value ⇒ bool" (infix "≻\<^sup>v" 50) where
+  " x ≻\<^sup>v y ≻\<^sup>v z ≡
+     ((assume X ≻\<^sup>c Y ≻\<^sup>c Z) 
+      if cluster_of x = X \<and>  cluster_of y = X \<and> cluster_of z = X then 
+x = leader X \<and> y 
+      else if x = leader C then y ≠ leader C     
+      else if y = leader C then False
+      else if cluster_cw C ≻\<^sup>c cluster_ccw C
+           then x = near_ccw C ∧ y = near_cw C    
+           else x = near_cw  C ∧ y = near_ccw C)"*)
+
+
+
+
+(*Some trivial lemmas:*)
+lemma "\<forall> x y.  (x  ≠ y \<and>  (x = leader C)) --> (y ≠ leader C)" 
+  by simp
+
+lemma leader_top: 
+"\<forall> x. (cluster_of x = C ) \<longrightarrow> ( leader C ≻\<^sup>v x ∨ leader C = x)"
+  by (simp add: intra_lt_def outranks_def)
+  
+lemma intra_asym: "intra_lt a b \<longrightarrow> ¬ intra_lt b a"  oops (*exception?*)
+  
+lemma outranks_asym: "x ≻\<^sup>v y -->  ¬ y ≻\<^sup>v x" 
+  by (smt (z3) Value.distinct(17) Value.distinct(53) Value.distinct(71) Value.exhaust cl_irrefl cl_trans cluster_of.simps(1) cluster_of.simps(2) cluster_of.simps(3) cluster_of.simps(4) cluster_of.simps(5) cluster_of.simps(6) cluster_of.simps(7) cluster_of.simps(8) cluster_of.simps(9) intra_lt_def leader.simps(2) near_ccw.simps(1) near_ccw.simps(2) near_ccw.simps(3) near_cw.simps(1) near_cw.simps(2) near_cw.simps(3) outranks_def)
+ 
+lemma A3_gt_A2_imp_C_gt_B:
+  "(A3 ≻\<^sup>v A2) \<longrightarrow> (B ≻\<^sup>c C)" oops
+
+lemma both_directions_hold:
+  shows "A3 ≻\<^sup>v A2 ⟹ B ≻\<^sup>c C"
+    and "A3 ≻\<^sup>v A2 ⟹ C ≻\<^sup>c B" oops (*ctm*)
+
+lemma only_one_direction_holds:
+   "(A2 ≻\<^sup>v A3) \<longrightarrow> (B ≻\<^sup>c C)" oops (*no ctm but no proof either*)
+
+lemma only_one_inverted_direction_holds:
+   "(B ≻\<^sup>c C) \<longrightarrow> (A2 ≻\<^sup>v A3) " oops (*no ctm but no proof*)
+
+lemma A3_gt_A2_implies_unique_outer:
+  assumes "A3 ≻\<^sup>v A2"
+  shows   "C ≻\<^sup>c B" unfolding "intra_lt_def" and "outranks_def" oops (*no ctm but no proof*)
+
+
+(*  We induce an intra-cluster value order based on 
+   the cluster priority: if the clockwise neighboring cluster is ranked higher (X_clockwise ≻_cl X_counterclockwise), 
+   then the value leaning toward that higher neighbor (X2) is preferred to the one leaning toward the lower neighbor (X3), ceteris paribus. 
+   X1 is always the top value within cluster X. *)
+(*definition outranks :: "Value ⇒ Value ⇒ bool" (infix "≻" 50) where 
+  "x ≻ y ≡ (
+     let A = cluster_of x; B = cluster_of y 
+     in if A ≠ B then A ≻_cl B 
+        else 
+          (if x = (case x of A ⇒ A1 | B ⇒ B1 | C ⇒ C1) then 
+              (y ≠ (case y of A ⇒ A1 | B ⇒ B1 | C ⇒ C1)) 
+           else if y = (case X of A ⇒ A1 | B ⇒ B1 | C ⇒ C1) then False 
+          else 
+             ((x = (case x of A ⇒ A2 | B ⇒ B2 | C ⇒ C2) ∧ 
+               y = (case y of A ⇒ A3 | B ⇒ B3 | C ⇒ C3) ∧ cluster_cw X ≻_cl cluster_ccw X)
+              ∨ 
+              (x = (case X of A ⇒ A2 | B ⇒ B2 | C ⇒ C2) ∧ 
+               y = (case X of A ⇒ A3 | B ⇒ B3 | C ⇒ C3) ∧ cluster_cw X ≻_cl cluster_ccw X)
+              ∨ 
+              (x = (case X of A ⇒ A3 | B ⇒ B3 | C ⇒ C3) ∧ 
+               y = (case X of A ⇒ A2 | B ⇒ B2 | C ⇒ C2) ∧ ¬(cluster_cw X ≻_cl cluster_ccw X))
+             )))"*)
+
+(* Note: The above definition enumerates cases for clarity. 
+   - If x and y are from different clusters, x ≻₂ y holds iff x’s cluster is ranked above y’s cluster (X ≻_cl Y).
+   - If x and y are in the same cluster X:
+       * If x is the central value X1 (and y is not X1), then x ≻₂ y (X1 is top within X). 
+       * If y is X1 (and x is not), then x ≺₂ y (so x ≻₂ y is False).
+       * Otherwise, x and y must be X2 and X3. In that case, if cluster_cw X ≻_cl cluster_ccw X, then X2 ≻₂ X3; 
+         if the counterclockwise neighbor cluster is ranked higher (cluster_ccw X ≻_cl cluster_cw X), then X3 ≻₂ X2. 
+   This realizes the “leaning” preference: e.g. if X’s clockwise neighbor cluster is considered more important than the counterclockwise one, 
+   the value leaning toward that clockwise side (X2) is preferred over X3 (leaning to the less important side), all else equal.
+*)
+
+definition projset_preferred :: "Value set ⇒ Value set ⇒ bool" where
+  "projset_preferred S T ≡ (∃ v ∈ S. ∀ u ∈ T. v ≻\<^sup>v u)"
+
+definition project_preferred :: " w ⇒  w ⇒ bool" where
+  "project_preferred w1 w2 ≡ projset_preferred (Iset w1) (Iset w2)"
+
+(* A project is preferred in this ontology if it includes some value v that outranks all values in the other project (according to the cluster-based value order ≻₂). *)
+lemma higher_cluster_pref:
+  assumes "∃ X. (∃ v ∈ Iset w1. cluster_of v = X) ∧ (∀ u ∈ Iset w2. X ≻\<^sup>c cluster_of u)"
+  shows "project_preferred w1 w2"
+proof -
+  from assms obtain X where "∃v ∈ Iset w1. cluster_of v = X" 
+                   and H: "∀u ∈ Iset w2. X ≻\<^sup>c cluster_of u" by auto
+  then obtain v0 where "v0 ∈ Iset w1" and "cluster_of v0 = X" by auto
+  hence "∀u ∈ Iset w2. cluster_of v0 ≻\<^sup>c cluster_of u" using H by simp
+  hence "∀u ∈ Iset w2. v0 ≻\<^sup>v u"
+    unfolding outranks_def 
+    by (metis cl_irrefl) (* cross-cluster case *)
+  thus "project_preferred w1 w2"
+    unfolding project_preferred_def projset_preferred_def by (meson `v0 ∈ Iset w1`)
+qed
+
+(* In particular, if the highest-ranked cluster among w1’s values outranks the highest cluster of w2’s values, then w1 ≻ w2. 
+   (Likewise, if both share the top cluster, the tie is broken by the internal cluster order: 
+    e.g. if both promote values from cluster A, a project including A1 (central) is preferred to one whose best is A2 or A3; 
+    and if the best values are A2 vs A3, the preference follows the orientation of cluster A’s leanings.) *)
+end
+
+(** Ontology 3: Fully flexible (partial value preferences). **)
+locale Ontology3 =
+  fixes "≻" :: "Value ⇒ Value ⇒ bool"   (infix "≻" 50)
+  assumes trans_pref: "transitive ≻" and irrefl_pref: "irrefl ≻"
+  (* ≻ is a strict partial order on values (not assumed total), representing known value preferences. *)
+begin
+
+definition projset_preferred :: "Value set ⇒ Value set ⇒ bool" where
+  "projset_preferred S T ≡ (∃ v ∈ S. ∀ u ∈ T. v ≻ u) ∧ ¬(∃ u ∈ T. ∀ x ∈ S. u ≻ x)"
+definition project_preferred :: "⟨iota⟩ ⇒ ⟨iota⟩ ⇒ bool" where
+  "project_preferred w1 w2 ≡ projset_preferred (Iset w1) (Iset w2)"
+
+(* A project w1 is preferred to w2 if w1 promotes at least one value that is known to outrank all values promoted by w2, 
+   and w2 does not have any value that outranks all of w1’s values. This ensures a safe (robust) dominance given partial preferences. *)
+lemma dominate_preferred:
+  assumes "∃ v ∈ Iset w1. ∀ u ∈ Iset w2. v ≻ u" 
+    and "¬(∃ u ∈ Iset w2. ∀ x ∈ Iset w1. u ≻ x)"
+  shows "project_preferred w1 w2"
+  by (simp add: assms project_preferred_def projset_preferred_def)
+
+(* **Connection to ceteris paribus (CP) modal logic:** 
+   We can express such dominance using CP operators:contentReference[oaicite:0]{index=0}:contentReference[oaicite:1]{index=1}. 
+   Let φ ≡ (λw. ∀v. (v ∈ Iset w1) ↔ I w v) be a proposition that “world w realizes project w1’s exact values” 
+   (similarly for ψ and project w2). Let Γ be the set of all value-formulas on which w1 and w2 do not differ 
+   (i.e. values that either both projects promote or both omit). Then under the above assumptions, we obtain a CP preference 
+   φ \<prec>\<^sub>A\<^sub>A^Γ ψ: all else being equal (Γ), any world where w1’s project values hold is strictly preferred 
+   to any world where w2’s values hold:contentReference[oaicite:2]{index=2}:contentReference[oaicite:3]{index=3}. In other words, w1’s project *robustly* dominates w2’s project 
+   given the known (partial) value order.
+*)
+end
+
+end
